@@ -1,0 +1,90 @@
+#include <avr/io.h>
+#include <avr/interrupt.h>
+#include <util/delay.h>
+#include <stdlib.h>
+
+#define FOSC   16000000U
+#define BAUD   9600
+#define MYUBRR (FOSC/16/BAUD - 1)
+
+#define botao (1 << PD2)
+
+char msg_tx[20];
+char msg_rx[10];  
+int pos_msg_rx = 0;
+int tamanho_msg_rx = 5;   // "zerar" tem 5 letras
+
+unsigned int contador = 0;
+
+// Protótipos
+void UART_Init(unsigned int ubrr);
+void UART_Transmit(char *dados);
+
+ISR(USART_RX_vect)
+{
+    msg_rx[pos_msg_rx++] = UDR0;
+    if (pos_msg_rx == tamanho_msg_rx)
+        pos_msg_rx = 0;
+}
+
+ISR(INT0_vect)
+{
+    _delay_ms(50); // debounce simples
+
+    if ((PIND & botao) == 0)
+    {
+        contador++;
+
+        UART_Transmit("Contagem: ");
+        itoa(contador, msg_tx, 10);
+        UART_Transmit(msg_tx);
+        UART_Transmit("\n");
+    }
+}
+
+void UART_Init(unsigned int ubrr)
+{
+    UBRR0H = (unsigned char)(ubrr >> 8);
+    UBRR0L = (unsigned char)ubrr;
+    UCSR0B = (1<<RXEN0)|(1<<TXEN0)|(1<<RXCIE0);
+    UCSR0C = (1<<UCSZ01)|(1<<UCSZ00);
+}
+
+void UART_Transmit(char *dados)
+{
+    while (*dados != 0)
+    {
+        while (!(UCSR0A & (1 << UDRE0)));
+        UDR0 = *dados;
+        dados++;
+    }
+}
+
+int main(void)
+{
+    UART_Init(MYUBRR);
+    sei();
+
+    // Pino do botão com pull-up
+    DDRD &= ~botao;
+    PORTD |= botao;
+
+    // Interrupção INT0 por borda de descida
+    EICRA |= (1 << ISC01);
+    EIMSK |= (1 << INT0);
+
+    UART_Transmit("Pressione o botao ou envie 'zerar'\n");
+
+    while (1)
+    {
+        if (msg_rx[0]=='z' &&
+            msg_rx[1]=='e' &&
+            msg_rx[2]=='r' &&
+            msg_rx[3]=='a' &&
+            msg_rx[4]=='r')
+        {
+            contador = 0;
+            UART_Transmit("Contador zerado!\n");
+        }
+    }
+}
